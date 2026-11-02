@@ -115,6 +115,27 @@ describe("buildVariantOptions", () => {
     expect(buildVariantOptions("/gpt", [])).toEqual([]);
     expect(buildVariantOptions("openai/", [])).toEqual([]);
   });
+
+  test("resolves object-shaped variants", () => {
+    const models = [
+      {
+        providerID: "opencode-go",
+        id: "deepseek",
+        variants: { max: { reasoningEffort: "max" }, fast: { temperature: 0 } },
+      },
+    ];
+    expect(buildVariantOptions("opencode-go/deepseek", models)).toEqual([
+      { title: "max", value: "max", description: "reasoningEffort: max" },
+      { title: "fast", value: "fast", description: "temperature: 0" },
+    ]);
+  });
+
+  test("returns no options when the model is not in the catalog", () => {
+    expect(buildVariantOptions("openai/gpt", [])).toEqual([]);
+    expect(
+      buildVariantOptions("openai/gpt", [{ providerID: "anthropic", id: "opus", variants: { high: {} } }])
+    ).toEqual([]);
+  });
 });
 
 describe("readAgentModel", () => {
