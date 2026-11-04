@@ -104,8 +104,13 @@ describe("OpenCode host boundary", () => {
     expect(manifest.name).toBe("agent-model-selector-opencode");
     expect(manifest.exports["./tui"]).toBe("./dist/tui.js");
     expect(manifest.peerDependencies["@opencode/plugin"]).toBe("2.0.29");
-    expect(manifest.files).toEqual(["dist", "package.json", "README.md"]);
+    expect(manifest.files).toEqual(["dist", "package.json", "README.md", "tui.ts"]);
     expect(JSON.stringify(manifest)).not.toMatch(/flowtask/i);
+  });
+
+  test("the package root exposes the discovery shim", () => {
+    const shim = read(path.join(opencodeDir, "tui.ts")).trim();
+    expect(shim).toBe('export { default } from "./dist/tui.js";');
   });
 
   test("the workspace root has no FlowTask dependency", () => {

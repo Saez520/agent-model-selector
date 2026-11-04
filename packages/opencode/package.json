@@ -1,6 +1,6 @@
 {
   "name": "agent-model-selector-opencode",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "type": "module",
   "main": "./dist/tui.js",
   "exports": {
@@ -10,7 +10,8 @@
   "files": [
     "dist",
     "package.json",
-    "README.md"
+    "README.md",
+    "tui.ts"
   ],
   "scripts": {
     "build": "tsup",
