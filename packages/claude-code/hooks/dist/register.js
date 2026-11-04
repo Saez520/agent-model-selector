@@ -1052,9 +1052,12 @@ function register(on, raw) {
     const cwd = typeof e?.cwd === "string" ? e.cwd : "";
     const host = hostOf($, cwd);
     const adapter = createAdapter(host);
-    const versionInput = await $.session.version().catch(() => {
-      return;
-    });
+    let versionInput;
+    try {
+      versionInput = await $.session.version();
+    } catch {
+      versionInput = undefined;
+    }
     const version = versionOf(versionInput);
     const api = {};
     try {
