@@ -1,6 +1,6 @@
 {
   "name": "agent-model-selector",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "workspaces": [
@@ -8,8 +8,8 @@
   ],
   "scripts": {
     "test": "bun test",
-    "build": "cd packages/opencode && bun run build",
-    "typecheck": "tsc -p packages/core/tsconfig.json --noEmit && tsc -p packages/opencode/tsconfig.json --noEmit"
+    "build": "cd packages/opencode && bun run build && cd ../claude-code && bun run build",
+    "typecheck": "tsc -p packages/core/tsconfig.json --noEmit && tsc -p packages/opencode/tsconfig.json --noEmit && tsc -p packages/claude-code/tsconfig.json --noEmit"
   },
   "devDependencies": {
     "@types/bun": "^1.4.4",

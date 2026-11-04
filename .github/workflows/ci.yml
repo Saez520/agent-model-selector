@@ -33,4 +33,4 @@ jobs:
         run: bun run build
 
       - name: Verify tracked dist
-        run: git diff --exit-code -- packages/opencode/dist
+        run: git diff --exit-code -- packages/opencode/dist packages/claude-code/hooks/dist

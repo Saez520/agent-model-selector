@@ -1,0 +1,14 @@
+{
+  "name": "agent-model-selector-claude-code",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Claude Code Mod that selects a model per agent and leaves OpenCode untouched.",
+  "scripts": {
+    "build": "bun build hooks/register.ts --outfile hooks/dist/register.js --target node --format esm --keep-names --external claude-code",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@agent-model-selector/core": "workspace:*"
+  }
+}

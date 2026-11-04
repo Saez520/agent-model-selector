@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "jsx": "react",
+    "jsxFactory": "h",
+    "jsxFragmentFactory": "Fragment",
+    "types": []
+  },
+  "include": [
+    "types",
+    "src/**/*.ts",
+    "hooks/**/*.ts"
+  ]
+}

@@ -1,0 +1,4 @@
+{
+  "description": "Model per agent: the pane, the command and the spawn override.",
+  "modules": ["./dist/register.js"]
+}

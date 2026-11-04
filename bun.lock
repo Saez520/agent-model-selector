@@ -9,13 +9,20 @@
         "typescript": "^5.7.0",
       },
     },
+    "packages/claude-code": {
+      "name": "agent-model-selector-claude-code",
+      "version": "0.1.0",
+      "dependencies": {
+        "@agent-model-selector/core": "workspace:*",
+      },
+    },
     "packages/core": {
       "name": "@agent-model-selector/core",
       "version": "0.1.1",
     },
     "packages/opencode": {
       "name": "agent-model-selector-opencode",
-      "version": "0.1.1",
+      "version": "0.1.2",
       "dependencies": {
         "@agent-model-selector/core": "workspace:*",
       },
@@ -424,6 +431,8 @@
     "acorn": ["acorn@8.19.0", "", { "bin": { "acorn": "bin/acorn" } }, "sha512-oJlA3XiRm7Cyk6qFD2Jn8ak9B7jSy0qy00ADO3+8dpT0LSjFihQYv4C02LFCSYJV3Q37xYwwRy5m+IpIiUzqWw=="],
 
     "agent-base": ["agent-base@7.1.4", "", {}, "sha512-MnA+YT8fwfJPgBx3m60MNqakm30XOkyIoH1y6huTQvC0PwZG7ki8NacLBcrPbNoo8vEZy7Jpuk7+jMO+CUovTQ=="],
+
+    "agent-model-selector-claude-code": ["agent-model-selector-claude-code@workspace:packages/claude-code"],
 
     "agent-model-selector-opencode": ["agent-model-selector-opencode@workspace:packages/opencode"],
 

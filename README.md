@@ -9,8 +9,9 @@ core.
 
 ```text
 packages/
-  core/      tipos, mapping, validación y contrato de adapter
-  opencode/  adapter y TUI para OpenCode
+  core/         tipos, mapping, validación y contrato de adapter
+  opencode/     adapter y TUI para OpenCode
+  claude-code/  Mod, comando y pane para Claude Code
 presets/
   flowtask.json  preset opcional de referencia (data-only)
 ```
@@ -30,6 +31,31 @@ El adapter lee y escribe únicamente la configuración global de OpenCode:
 Solo modifica `agent.{nombre}.model` y `agent.{nombre}.variant`. El resto de la
 configuración se conserva sin cambios.
 
+## Uso en Claude Code
+
+El paquete `agent-model-selector-claude-code` es un Mod de Claude Code. Se carga
+en desarrollo con `claude --plugin-dir packages/claude-code` y expone el comando
+`/flowtask-model`:
+
+```text
+/flowtask-model
+/flowtask-model list
+/flowtask-model set flowtask-planner sonnet
+/flowtask-model clear flowtask-planner
+/flowtask-model clear --all
+/flowtask-model export
+/flowtask-model import backup.json
+```
+
+El override se guarda por proyecto y agente en el store del plugin y se aplica
+en el hook `agent.spawn`. El panel muestra el modelo actual y permite cambiarlo o
+limpiarlo; en superficies sin `Select` se usa la forma de comando. En `-p` no se
+dibuja nada, pero los argumentos siguen operando.
+
+El plugin requiere Claude Code `2.1.287` o superior. El detalle de la API, la
+persistencia y los límites está en
+[`packages/claude-code/COMPATIBILITY.md`](./packages/claude-code/COMPATIBILITY.md).
+
 ## Preset
 
 `presets/flowtask.json` documenta los modelos de referencia de los agentes de
@@ -47,8 +73,10 @@ bun run build
 bun run typecheck
 ```
 
-`packages/opencode/dist/tui.js` se versiona para permitir la instalación sin
-compilar. CI reconstruye el paquete y falla si `dist` difiere del commit.
+`packages/opencode/dist/tui.js` y
+`packages/claude-code/hooks/dist/register.js` se versionan para permitir la
+instalación sin compilar. CI reconstruye ambos paquetes y falla si `dist` difiere
+del commit.
 
 ## CI
 
