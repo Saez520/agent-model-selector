@@ -92,8 +92,6 @@ export interface ClaudeCodeHost {
   settings?: HostSettings;
   httpFetch?: HostHttp["fetch"];
   processRun?: HostProcess["run"];
-  /** Legacy surface kept until the adapter stops reading available models. */
-  availableModels?(): Promise<readonly string[] | undefined>;
   recordLastSpawn?(record: SpawnRecord): void;
 }
 

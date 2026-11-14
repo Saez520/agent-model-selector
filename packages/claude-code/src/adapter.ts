@@ -9,16 +9,18 @@ import {
   type TargetAdapter,
 } from "@agent-model-selector/core";
 import { dedupeAgents, discoverAgents } from "./agents";
+import {
+  findCatalogModel,
+  loadCatalog,
+  parseProfile,
+  qualityResult,
+  type CatalogError,
+  type CatalogModel,
+  type CatalogResult,
+} from "./catalog";
 import type { AgentDefinition, ClaudeCodeHost, RuntimeAgent } from "./host";
 import { agentKey, keysForRoot, modelKey, normalizeRoot, parseModelKey } from "./keys";
-import {
-  PROVIDER_ID,
-  PROVIDERS,
-  listModels as modelsFromAvailable,
-  modelRef,
-  normalizeModel,
-  stripModelRef,
-} from "./models";
+import { PROVIDER_ID, modelRef, normalizeModel, stripModelRef } from "./models";
 
 export interface ImportResult {
   valid: boolean;
@@ -33,6 +35,11 @@ export interface ClaudeCodeAdapter extends TargetAdapter<HostConfig> {
   listAgents(config: HostConfig): AgentInfo[];
   listProviders(): ProviderInfo[];
   listModels(): Promise<ModelInfo[]>;
+  seedCatalog(): Promise<void>;
+  refreshCatalog(): Promise<void>;
+  catalogError(): CatalogError | undefined;
+  mainModel(): CatalogModel | undefined;
+  selectionValue(selection: string): string;
   readAgents(): Promise<RuntimeAgent[]>;
   setAgentModel(agentName: string, model: string): Promise<void>;
   clearAgentModel(agentName: string): Promise<void>;
@@ -69,9 +76,78 @@ function sortAgents(agents: RuntimeAgent[]): RuntimeAgent[] {
  */
 export function createAdapter(host: ClaudeCodeHost): ClaudeCodeAdapter {
   let cachedAgents: RuntimeAgent[] = [];
+  let catalog: CatalogResult | null = null;
+  let catalogLoaded = false;
 
   async function root(): Promise<string> {
     return normalizeRoot(await host.projectRoot());
+  }
+
+  async function settingsSnapshot(): Promise<Readonly<Record<string, unknown>>> {
+    if (host.settings === undefined) return {};
+    try {
+      return (await host.settings.read()) ?? {};
+    } catch {
+      return {};
+    }
+  }
+
+  async function sessionModelSnapshot(): Promise<string | undefined> {
+    try {
+      const model = await host.sessionModel();
+      return typeof model === "string" && model.trim() !== ""
+        ? model.trim()
+        : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  async function seedCatalog(): Promise<void> {
+    if (catalog !== null) return;
+    const settings = await settingsSnapshot();
+    const sessionModel = await sessionModelSnapshot();
+    catalog = qualityResult(parseProfile(settings, sessionModel));
+    catalogLoaded = false;
+  }
+
+  async function refreshCatalog(): Promise<void> {
+    const settings = await settingsSnapshot();
+    const sessionModel = await sessionModelSnapshot();
+    catalog = await loadCatalog(settings, host, sessionModel);
+    catalogLoaded = true;
+  }
+
+  async function ensureCatalog(): Promise<void> {
+    if (catalog === null) await refreshCatalog();
+  }
+
+  async function ensureLoadedCatalog(): Promise<void> {
+    if (catalog === null || !catalogLoaded) await refreshCatalog();
+  }
+
+  /**
+   * Resolve a stored value to the short selection the store keeps. A plain
+   * alias is already a selection; a provider/model reference must name an
+   * offered model or the write is rejected.
+   */
+  async function selectionOf(model: string): Promise<string | null> {
+    const normalized = normalizeModel(model);
+    if (normalized === null) return null;
+    if (!normalized.includes("/")) return normalized;
+    await ensureLoadedCatalog();
+    const found = findCatalogModel(catalog?.models ?? [], normalized);
+    if (found === undefined) {
+      throw new Error(`unsupported model: ${model}`);
+    }
+    return found.selection;
+  }
+
+  function selectionValue(selection: string): string {
+    const found = (catalog?.models ?? []).find(
+      (model) => model.selection === selection
+    );
+    return found?.target ?? modelRef(selection);
   }
 
   async function storedByAgent(): Promise<Map<string, string>> {
@@ -169,13 +245,13 @@ export function createAdapter(host: ClaudeCodeHost): ClaudeCodeAdapter {
     const projectRoot = await root();
     const key = agentKey(agentName);
     if (key === "") return;
-    const normalized = normalizeModel(model);
-    if (normalized === null) {
+    const selection = await selectionOf(model);
+    if (selection === null) {
       await host.store.delete(modelKey(projectRoot, key));
       return;
     }
     await host.store.set(modelKey(projectRoot, key), {
-      model: normalized,
+      model: selection,
       updatedAt: new Date().toISOString(),
     });
   }
@@ -250,20 +326,50 @@ export function createAdapter(host: ClaudeCodeHost): ClaudeCodeAdapter {
     }
 
     const errors: string[] = [];
-    const operations: { agent: string; model: string | null }[] = [];
+    const operations: { agent: string; selection: string | null }[] = [];
     for (const entry of validation.mapping.agents) {
       if (entry.inherit === true || entry.model === undefined) {
-        operations.push({ agent: entry.agent, model: null });
+        operations.push({ agent: entry.agent, selection: null });
         continue;
       }
-      if (!entry.model.startsWith(`${PROVIDER_ID}/`)) {
-        errors.push(`agent ${entry.agent}: model must use ${PROVIDER_ID}/<model>`);
+
+      const model = entry.model;
+      let reference: string | undefined;
+      if (model.startsWith(`${PROVIDER_ID}/`)) {
+        const rest = stripModelRef(model);
+        if (!rest.includes("/")) {
+          operations.push({ agent: entry.agent, selection: rest });
+          continue;
+        }
+        reference = rest;
+      } else if (model.includes("/")) {
+        reference = model;
+      }
+      if (reference === undefined) {
+        errors.push(
+          `agent ${entry.agent}: model must use ${PROVIDER_ID}/<model>`
+        );
         continue;
       }
-      operations.push({
-        agent: entry.agent,
-        model: stripModelRef(entry.model),
-      });
+
+      await ensureLoadedCatalog();
+      const provider = reference.slice(0, reference.indexOf("/")).trim();
+      const providerKnown = (catalog?.providers ?? []).some(
+        (candidate) =>
+          candidate.id.trim().toLowerCase() === provider.toLowerCase()
+      );
+      if (!providerKnown) {
+        errors.push(
+          `agent ${entry.agent}: model must use ${PROVIDER_ID}/<model>`
+        );
+        continue;
+      }
+      const found = findCatalogModel(catalog?.models ?? [], reference);
+      if (found === undefined) {
+        errors.push(`agent ${entry.agent}: unsupported model ${reference}`);
+        continue;
+      }
+      operations.push({ agent: entry.agent, selection: found.selection });
     }
 
     if (errors.length > 0) {
@@ -271,10 +377,16 @@ export function createAdapter(host: ClaudeCodeHost): ClaudeCodeAdapter {
     }
 
     for (const operation of operations) {
-      if (operation.model === null) {
+      if (operation.selection === null) {
         await clearAgentModel(operation.agent);
       } else {
-        await setAgentModel(operation.agent, operation.model);
+        const projectRoot = await root();
+        const key = agentKey(operation.agent);
+        if (key === "") continue;
+        await host.store.set(modelKey(projectRoot, key), {
+          model: operation.selection,
+          updatedAt: new Date().toISOString(),
+        });
       }
     }
     return { valid: true, errors: [], applied: operations.length };
@@ -311,12 +423,21 @@ export function createAdapter(host: ClaudeCodeHost): ClaudeCodeAdapter {
       });
     },
     listProviders() {
-      return PROVIDERS;
+      return catalog?.providers ?? [];
     },
     async listModels() {
-      const available = await host.availableModels?.().catch(() => undefined);
-      return modelsFromAvailable(available);
+      await ensureCatalog();
+      return catalog?.models ?? [];
     },
+    seedCatalog,
+    refreshCatalog,
+    catalogError() {
+      return catalog?.error;
+    },
+    mainModel() {
+      return catalog?.mainModel;
+    },
+    selectionValue,
     readAgents,
     setAgentModel,
     clearAgentModel,

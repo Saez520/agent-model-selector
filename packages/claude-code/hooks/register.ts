@@ -8,7 +8,6 @@ import {
 } from "../src/capabilities";
 import type { ClaudeCodeHost, SpawnRecord } from "../src/host";
 import { modelKey, normalizeRoot } from "../src/keys";
-import { PROVIDERS, listModels as modelsFromAvailable, normalizeAvailable } from "../src/models";
 import { MIN_VERSION, versionOf } from "../src/version";
 import { handleCommand } from "./commands";
 import { renderPanel } from "./panel";
@@ -84,18 +83,6 @@ function hostOf($: EngineInterface, fallbackCwd: string): ClaudeCodeHost {
     },
     processRun: (argv, init) =>
       $.process.run(argv, { timeoutMs: 5000, ...init }),
-    availableModels: async () => {
-      try {
-        const settings = await $.settings.read();
-        const value =
-          settings && typeof settings === "object"
-            ? (settings as Record<string, unknown>).availableModels
-            : undefined;
-        return normalizeAvailable(value);
-      } catch {
-        return undefined;
-      }
-    },
     recordLastSpawn: (record) => {
       lastSpawn = record;
     },
@@ -195,8 +182,8 @@ export function register(on: On, raw: PluginOptions): void {
       version,
       gate,
       agents: [],
-      models: modelsFromAvailable(undefined),
-      providers: PROVIDERS,
+      models: [],
+      providers: [],
       isPanelAvailable: panelAvailable(api) && hasSurface,
       refresh: refreshRuntime,
       log: (message) => logLine($, message),
