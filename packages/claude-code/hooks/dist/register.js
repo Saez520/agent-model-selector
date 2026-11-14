@@ -23,6 +23,32 @@ function buildModelOptions(models, providers = []) {
   }
   return options;
 }
+function buildModelSections(models, providers = []) {
+  const allOptions = buildModelOptions(models, providers);
+  const allSection = {
+    id: "all",
+    label: "All",
+    kind: "all",
+    items: allOptions
+  };
+  const providerSections = [];
+  const groups = new Map;
+  for (const option of allOptions.slice(1)) {
+    const providerID = option.value.split("/")[0];
+    groups.set(providerID, [...groups.get(providerID) ?? [], option]);
+  }
+  for (const [providerID, items] of groups) {
+    const providerName = providers.find((provider) => provider.id === providerID)?.name ?? providerID;
+    providerSections.push({
+      id: `provider:${providerID}`,
+      label: providerName,
+      kind: "provider",
+      items
+    });
+  }
+  providerSections.sort((a, b) => a.label.localeCompare(b.label));
+  return [allSection, ...providerSections];
+}
 function readAgentModel(config, agentName) {
   const agent = config?.agent?.[agentName];
   const result = {};
@@ -327,37 +353,13 @@ function matchAgentKey(subagentType, catalog2, log) {
 // src/models.ts
 var PROVIDER_ID = "claude-code";
 var PROVIDER_NAME = "Claude Code";
-var ALIASES = ["sonnet", "opus", "haiku", "fable"];
-var PROVIDERS = [{ id: PROVIDER_ID, name: PROVIDER_NAME }];
 function modelRef(model) {
-  if (model.startsWith(`${PROVIDER_ID}/`))
+  if (model.includes("/"))
     return model;
   return `${PROVIDER_ID}/${model}`;
 }
 function stripModelRef(ref) {
   return ref.startsWith(`${PROVIDER_ID}/`) ? ref.slice(PROVIDER_ID.length + 1) : ref;
-}
-function normalizeAvailable(value) {
-  if (!Array.isArray(value))
-    return;
-  const names = [];
-  for (const entry of value) {
-    if (typeof entry === "string" && entry.trim() !== "") {
-      const name = entry.trim();
-      if (!names.includes(name))
-        names.push(name);
-    }
-  }
-  return names.length > 0 ? names : undefined;
-}
-function listModels(available) {
-  const names = normalizeAvailable(available) ?? [...ALIASES];
-  return names.map((name) => ({
-    providerID: PROVIDER_ID,
-    id: name,
-    modelID: name,
-    name
-  }));
 }
 function isInherit(value) {
   return typeof value === "string" && value.trim().toLowerCase() === "inherit";
@@ -371,6 +373,282 @@ function normalizeModel(value) {
   if (trimmed === CLEAR_SENTINEL)
     return null;
   return stripModelRef(trimmed);
+}
+
+// src/catalog.ts
+function asRecord(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : undefined;
+}
+function firstString(...values) {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim() !== "")
+      return value.trim();
+  }
+  return;
+}
+function normalizeReference(value) {
+  return value.replace(/\s*\[[^\]]*\]\s*$/g, "").replace(/\s*\(1m context\)\s*$/gi, "").replace(/\s+/g, " ").trim().toLowerCase();
+}
+function cleanReference(value) {
+  return value.replace(/\s*\[[^\]]*\]\s*$/g, "").replace(/\s*\(1m context\)\s*$/gi, "").replace(/\s+/g, " ").trim();
+}
+function targetOf(value, fallbackProvider) {
+  const clean = cleanReference(value);
+  if (clean === "")
+    return;
+  const separator = clean.indexOf("/");
+  if (separator > 0 && separator < clean.length - 1) {
+    const provider2 = clean.slice(0, separator).trim();
+    const model2 = clean.slice(separator + 1).trim();
+    if (provider2 === "" || model2 === "")
+      return;
+    const ref2 = `${provider2}/${model2}`;
+    return { provider: provider2, model: model2, ref: ref2, normalized: normalizeReference(ref2) };
+  }
+  const model = clean;
+  const provider = fallbackProvider?.trim() ?? "";
+  const ref = provider === "" ? model : `${provider}/${model}`;
+  return { provider, model, ref, normalized: normalizeReference(ref) };
+}
+function parseProfile(settings, sessionModel) {
+  const root = asRecord(settings) ?? {};
+  const env = asRecord(root.env) ?? {};
+  const mainValue = firstString(env.ANTHROPIC_MODEL) ?? firstString(root.model) ?? firstString(sessionModel);
+  const sonnet = firstString(env.ANTHROPIC_DEFAULT_SONNET_MODEL);
+  const haiku = firstString(env.ANTHROPIC_DEFAULT_HAIKU_MODEL);
+  const opus = firstString(env.ANTHROPIC_DEFAULT_OPUS_MODEL);
+  return {
+    ...mainValue !== undefined ? { main: targetOf(mainValue) } : {},
+    ...sonnet !== undefined ? { sonnet: targetOf(sonnet) } : {},
+    ...haiku !== undefined ? { haiku: targetOf(haiku) } : {},
+    ...opus !== undefined ? { opus: targetOf(opus) } : {}
+  };
+}
+function gatewayEntries(input) {
+  if (Array.isArray(input))
+    return input;
+  const root = asRecord(input);
+  if (!root)
+    return;
+  for (const key of ["data", "models", "items"]) {
+    const value = root[key];
+    if (Array.isArray(value))
+      return value;
+  }
+  return;
+}
+function labelFor(target, display) {
+  if (display === undefined)
+    return target.model;
+  const clean = cleanReference(display);
+  if (clean === "")
+    return target.model;
+  const separator = clean.indexOf("/");
+  if (separator > 0) {
+    const provider = clean.slice(0, separator).trim().toLowerCase();
+    const model = clean.slice(separator + 1).trim();
+    if (provider === target.provider.toLowerCase() && model !== "")
+      return model;
+  }
+  return clean;
+}
+function parseGatewayModels(input) {
+  const entries = gatewayEntries(input);
+  if (entries === undefined)
+    return [];
+  const models = [];
+  const seen = new Set;
+  for (const entry of entries) {
+    const record = asRecord(entry);
+    if (!record)
+      continue;
+    const idValue = firstString(record.id, record.model_id, record.modelId, record.slug);
+    const providerValue = firstString(record.provider, record.providerName, record.owned_by, record.ownedBy, record.provider_id, record.providerId);
+    const targetValue = firstString(record.target_model, record.targetModel);
+    const displayValue = firstString(record.display_name, record.displayName, record.name);
+    let target;
+    if (targetValue !== undefined) {
+      target = targetOf(targetValue, targetValue.includes("/") ? undefined : providerValue);
+    } else if (displayValue !== undefined && displayValue.includes("/")) {
+      target = targetOf(displayValue);
+    } else if (displayValue !== undefined && idValue !== undefined && idValue.includes("/")) {
+      target = targetOf(idValue);
+    } else if (displayValue !== undefined && providerValue !== undefined) {
+      target = targetOf(displayValue, providerValue);
+    } else if (idValue !== undefined) {
+      target = targetOf(idValue, providerValue);
+    }
+    if (target === undefined || target.provider === "")
+      continue;
+    if (seen.has(target.normalized))
+      continue;
+    seen.add(target.normalized);
+    models.push({
+      providerID: target.provider,
+      id: target.model,
+      name: labelFor(target, displayValue),
+      target: target.ref,
+      selection: ""
+    });
+  }
+  return models;
+}
+function selectSupportedModels(models, profile) {
+  const selections = new Map;
+  if (profile.sonnet !== undefined) {
+    selections.set(profile.sonnet.normalized, "sonnet");
+  }
+  if (profile.haiku !== undefined && !selections.has(profile.haiku.normalized)) {
+    selections.set(profile.haiku.normalized, "haiku");
+  }
+  const supported = [];
+  const seen = new Set;
+  for (const model of models) {
+    const normalized = normalizeReference(model.target);
+    const selection = selections.get(normalized);
+    if (selection === undefined || seen.has(normalized))
+      continue;
+    seen.add(normalized);
+    supported.push({ ...model, selection });
+  }
+  return supported;
+}
+function qualitySelection(profile, main) {
+  if (profile.sonnet !== undefined && main.normalized === profile.sonnet.normalized) {
+    return "sonnet";
+  }
+  if (profile.haiku !== undefined && main.normalized === profile.haiku.normalized) {
+    return "haiku";
+  }
+  return main.model;
+}
+function qualityModel(profile) {
+  const main = profile.main;
+  if (main === undefined)
+    return;
+  const providerID = main.provider === "" ? PROVIDER_NAME : main.provider;
+  const target = main.provider === "" ? `${providerID}/${main.model}` : main.ref;
+  return {
+    providerID,
+    id: main.model,
+    name: main.model,
+    target,
+    selection: qualitySelection(profile, main)
+  };
+}
+function providersOf(models) {
+  const providers = new Map;
+  for (const model of models) {
+    if (!providers.has(model.providerID)) {
+      providers.set(model.providerID, {
+        id: model.providerID,
+        name: model.providerID
+      });
+    }
+  }
+  return [...providers.values()];
+}
+function qualityResult(profile, models = [], error) {
+  const merged = models.map((model) => ({ ...model }));
+  const main = qualityModel(profile);
+  if (main !== undefined && !merged.some((model) => normalizeReference(model.target) === normalizeReference(main.target))) {
+    merged.push(main);
+  }
+  const mainModel = main === undefined ? undefined : merged.find((model) => normalizeReference(model.target) === normalizeReference(main.target));
+  return {
+    models: merged,
+    providers: providersOf(merged),
+    ...mainModel !== undefined ? { mainModel } : {},
+    ...error !== undefined ? { error } : {}
+  };
+}
+function errorOf(kind, message) {
+  return { kind, message };
+}
+function failure(profile, error) {
+  return qualityResult(profile, [], error);
+}
+async function readApiKey(settings, host) {
+  const root = asRecord(settings) ?? {};
+  const helper = firstString(root.apiKeyHelper);
+  if (helper === undefined)
+    return;
+  if (host.processRun !== undefined) {
+    try {
+      const result = await host.processRun([helper], { timeoutMs: 5000 });
+      if (result.exitCode === 0) {
+        const value = result.stdout.trim();
+        if (value !== "")
+          return value;
+      }
+    } catch {}
+  }
+  try {
+    const raw = await host.fs.read(helper);
+    const literals = [...raw.matchAll(/['"`]([^'"`\r\n]+)['"`]/g)].map((match) => match[1].trim()).filter((value2) => value2 !== "" && !value2.startsWith("$") && !value2.includes("%s"));
+    const value = literals.at(-1);
+    if (value !== undefined)
+      return value;
+  } catch {}
+  return;
+}
+async function loadCatalog(settings, host, sessionModel) {
+  const profile = parseProfile(settings, sessionModel);
+  const root = asRecord(settings) ?? {};
+  const env = asRecord(root.env) ?? {};
+  const base = firstString(env.ANTHROPIC_BASE_URL, env.ANTHROPIC_API_BASE_URL);
+  if (base === undefined) {
+    return failure(profile, errorOf("unconfigured", "the model gateway address is not configured; showing the quality route"));
+  }
+  if (host.httpFetch === undefined) {
+    return failure(profile, errorOf("unconfigured", "the model gateway is unavailable on this surface; showing the quality route"));
+  }
+  const key = await readApiKey(settings, host);
+  const headers = {
+    "anthropic-version": "2023-06-01"
+  };
+  if (key !== undefined)
+    headers["x-api-key"] = key;
+  let response;
+  try {
+    response = await host.httpFetch(`${base.replace(/\/+$/, "")}/v1/models`, {
+      method: "GET",
+      headers
+    });
+  } catch {
+    return failure(profile, errorOf("unreachable", "the model gateway is unreachable; showing the quality route"));
+  }
+  if (response.status === 401 || response.status === 403) {
+    return failure(profile, errorOf("credential", "the model gateway rejected the credential; showing the quality route"));
+  }
+  if (response.status < 200 || response.status >= 300) {
+    return failure(profile, errorOf("unreachable", `the model gateway responded with status ${response.status}; showing the quality route`));
+  }
+  if (typeof response.text !== "string") {
+    return failure(profile, errorOf("invalid_response", "the model gateway returned an invalid model list; showing the quality route"));
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(response.text);
+  } catch {
+    return failure(profile, errorOf("invalid_response", "the model gateway returned an invalid model list; showing the quality route"));
+  }
+  const entries = gatewayEntries(parsed);
+  if (entries === undefined) {
+    return failure(profile, errorOf("invalid_response", "the model gateway returned an invalid model list; showing the quality route"));
+  }
+  if (entries.length === 0) {
+    return failure(profile, errorOf("no_supported", "the model gateway offers no supported model; showing the quality route"));
+  }
+  const supported = selectSupportedModels(parseGatewayModels(parsed), profile);
+  if (supported.length === 0) {
+    return failure(profile, errorOf("no_supported", "the model gateway offers no supported model; showing the quality route"));
+  }
+  return qualityResult(profile, supported);
+}
+function findCatalogModel(models, reference) {
+  const normalized = normalizeReference(reference);
+  return models.find((model) => normalizeReference(model.target) === normalized);
 }
 
 // src/adapter.ts
@@ -399,8 +677,66 @@ function sortAgents(agents) {
 }
 function createAdapter(host) {
   let cachedAgents = [];
+  let catalog2 = null;
+  let catalogLoaded = false;
   async function root() {
     return normalizeRoot(await host.projectRoot());
+  }
+  async function settingsSnapshot() {
+    if (host.settings === undefined)
+      return {};
+    try {
+      return await host.settings.read() ?? {};
+    } catch {
+      return {};
+    }
+  }
+  async function sessionModelSnapshot() {
+    try {
+      const model = await host.sessionModel();
+      return typeof model === "string" && model.trim() !== "" ? model.trim() : undefined;
+    } catch {
+      return;
+    }
+  }
+  async function seedCatalog() {
+    if (catalog2 !== null)
+      return;
+    const settings = await settingsSnapshot();
+    const sessionModel = await sessionModelSnapshot();
+    catalog2 = qualityResult(parseProfile(settings, sessionModel));
+    catalogLoaded = false;
+  }
+  async function refreshCatalog() {
+    const settings = await settingsSnapshot();
+    const sessionModel = await sessionModelSnapshot();
+    catalog2 = await loadCatalog(settings, host, sessionModel);
+    catalogLoaded = true;
+  }
+  async function ensureCatalog() {
+    if (catalog2 === null)
+      await refreshCatalog();
+  }
+  async function ensureLoadedCatalog() {
+    if (catalog2 === null || !catalogLoaded)
+      await refreshCatalog();
+  }
+  async function selectionOf(model) {
+    const normalized = normalizeModel(model);
+    if (normalized === null)
+      return null;
+    if (!normalized.includes("/"))
+      return normalized;
+    await ensureLoadedCatalog();
+    const found = findCatalogModel(catalog2?.models ?? [], normalized);
+    if (found === undefined) {
+      throw new Error(`unsupported model: ${model}`);
+    }
+    return found.selection;
+  }
+  function selectionValue(selection) {
+    const found = (catalog2?.models ?? []).find((model) => model.selection === selection);
+    return found?.target ?? modelRef(selection);
   }
   async function storedByAgent() {
     const projectRoot = await root();
@@ -493,13 +829,13 @@ function createAdapter(host) {
     const key = agentKey(agentName);
     if (key === "")
       return;
-    const normalized = normalizeModel(model);
-    if (normalized === null) {
+    const selection = await selectionOf(model);
+    if (selection === null) {
       await host.store.delete(modelKey(projectRoot, key));
       return;
     }
     await host.store.set(modelKey(projectRoot, key), {
-      model: normalized,
+      model: selection,
       updatedAt: new Date().toISOString()
     });
   }
@@ -571,26 +907,54 @@ function createAdapter(host) {
     const operations = [];
     for (const entry of validation.mapping.agents) {
       if (entry.inherit === true || entry.model === undefined) {
-        operations.push({ agent: entry.agent, model: null });
+        operations.push({ agent: entry.agent, selection: null });
         continue;
       }
-      if (!entry.model.startsWith(`${PROVIDER_ID}/`)) {
+      const model = entry.model;
+      let reference;
+      if (model.startsWith(`${PROVIDER_ID}/`)) {
+        const rest = stripModelRef(model);
+        if (!rest.includes("/")) {
+          operations.push({ agent: entry.agent, selection: rest });
+          continue;
+        }
+        reference = rest;
+      } else if (model.includes("/")) {
+        reference = model;
+      }
+      if (reference === undefined) {
         errors.push(`agent ${entry.agent}: model must use ${PROVIDER_ID}/<model>`);
         continue;
       }
-      operations.push({
-        agent: entry.agent,
-        model: stripModelRef(entry.model)
-      });
+      await ensureLoadedCatalog();
+      const provider = reference.slice(0, reference.indexOf("/")).trim();
+      const providerKnown = (catalog2?.providers ?? []).some((candidate) => candidate.id.trim().toLowerCase() === provider.toLowerCase());
+      if (!providerKnown) {
+        errors.push(`agent ${entry.agent}: model must use ${PROVIDER_ID}/<model>`);
+        continue;
+      }
+      const found = findCatalogModel(catalog2?.models ?? [], reference);
+      if (found === undefined) {
+        errors.push(`agent ${entry.agent}: unsupported model ${reference}`);
+        continue;
+      }
+      operations.push({ agent: entry.agent, selection: found.selection });
     }
     if (errors.length > 0) {
       return { valid: false, errors, applied: 0 };
     }
     for (const operation of operations) {
-      if (operation.model === null) {
+      if (operation.selection === null) {
         await clearAgentModel(operation.agent);
       } else {
-        await setAgentModel(operation.agent, operation.model);
+        const projectRoot = await root();
+        const key = agentKey(operation.agent);
+        if (key === "")
+          continue;
+        await host.store.set(modelKey(projectRoot, key), {
+          model: operation.selection,
+          updatedAt: new Date().toISOString()
+        });
       }
     }
     return { valid: true, errors: [], applied: operations.length };
@@ -617,14 +981,21 @@ function createAdapter(host) {
       });
     },
     listProviders() {
-      return PROVIDERS;
+      return catalog2?.providers ?? [];
     },
     async listModels() {
-      const available = await host.availableModels().catch(() => {
-        return;
-      });
-      return listModels(available);
+      await ensureCatalog();
+      return catalog2?.models ?? [];
     },
+    seedCatalog,
+    refreshCatalog,
+    catalogError() {
+      return catalog2?.error;
+    },
+    mainModel() {
+      return catalog2?.mainModel;
+    },
+    selectionValue,
     readAgents,
     setAgentModel,
     clearAgentModel,
@@ -636,7 +1007,7 @@ function createAdapter(host) {
 
 // src/version.ts
 var MIN_VERSION = "2.1.287";
-var RECOMMENDED_VERSION = "2.1.299";
+var RECOMMENDED_VERSION = "2.1.309";
 function versionOf(input) {
   if (typeof input === "string") {
     const trimmed = input.trim().replace(/^v/i, "");
@@ -706,7 +1077,7 @@ function evaluateGate(versionInput, api = {}) {
   if (api.fs === false)
     warnings.push("filesystem unavailable; agent discovery disabled");
   if (api.settingsRead === false) {
-    warnings.push("settings.read unavailable; alias catalog in use");
+    warnings.push("settings.read unavailable; live model catalog disabled");
   }
   return {
     status: warnings.length > 0 ? "warn" : "ok",
@@ -737,15 +1108,17 @@ function reasonOf(error) {
   return error instanceof Error ? error.message : String(error);
 }
 function valueOf(runtime, agent) {
-  if (agent.override !== undefined)
-    return `override ${agent.override}`;
-  const inherited = agent.model ?? runtime.sessionModel ?? "session";
+  if (agent.override !== undefined) {
+    return `override ${runtime.selectionValue(agent.override)}`;
+  }
+  const inherited = runtime.mainModel?.target ?? runtime.sessionModel ?? "session";
   return `inherit (${inherited})`;
 }
 function formatAgent(runtime, agent) {
   return `${agent.key}	${agent.type}	${agent.source}:${agent.scope}	${valueOf(runtime, agent)}`;
 }
 async function openPanel($, runtime) {
+  await runtime.refreshCatalog();
   if (!runtime.isPanelAvailable) {
     return { text: USAGE };
   }
@@ -805,8 +1178,10 @@ async function handleCommand($, e, runtime) {
     const rest = parts.slice(1);
     if (verb === "list") {
       const lines = runtime.agents.map((agent) => formatAgent(runtime, agent));
-      const text = lines.length > 0 ? lines.join(`
+      const body = lines.length > 0 ? lines.join(`
 `) : "no agents found; set <agent-key> <model> still works";
+      const text = runtime.catalogError !== undefined ? `${runtime.catalogError.message}
+${body}` : body;
       runtime.log(text);
       return { text };
     }
@@ -869,29 +1244,17 @@ ${result.errors.join(`
     return { text };
   }
 }
-function selectedValue(override) {
-  return override === undefined ? CLEAR_SENTINEL : modelRef(override);
-}
 
 // hooks/panel.ts
 function rowsAvailable(e) {
   const rows = e?.props?.scroll?.bodyRows;
   return typeof rows === "number" && Number.isFinite(rows) ? Math.max(4, Math.floor(rows)) : 14;
 }
-function currentValue(agent) {
-  return selectedValue(agent.override);
+function currentValue(runtime, agent) {
+  return agent.override !== undefined ? runtime.selectionValue(agent.override) : CLEAR_SENTINEL;
 }
-function optionList(runtime, agent) {
-  const options = buildModelOptions(runtime.models, runtime.providers);
-  const value = currentValue(agent);
-  if (options.some((option) => option.value === value))
-    return options;
-  if (agent.override === undefined)
-    return options;
-  return [
-    { title: `${agent.override} (current)`, value },
-    ...options
-  ];
+function qualityLabel(runtime) {
+  return runtime.mainModel?.target ?? runtime.sessionModel ?? "session";
 }
 function headerText(runtime) {
   const gate = runtime.gate;
@@ -909,28 +1272,36 @@ async function renderPanel($, e, runtime, next) {
     if (Box === undefined || Text === undefined)
       return next(e);
     const rows = rowsAvailable(e);
-    const visible = runtime.agents.slice(0, Math.max(1, rows - 4));
+    const visible = runtime.agents.slice(0, Math.max(1, rows - 5));
+    const sections = buildModelSections(runtime.models, runtime.providers).filter((section) => section.kind !== "all");
     const children = [
       h(Text, { key: "title" }, "FlowTask Model"),
       h(Text, { key: "root", dimColor: true }, runtime.root),
       h(Text, { key: "meta", dimColor: true }, headerText(runtime))
     ];
+    if (runtime.catalogError !== undefined) {
+      children.push(h(Text, { key: "catalog-error" }, runtime.catalogError.message));
+    }
     for (const agent of visible) {
+      const value = currentValue(runtime, agent);
       const row = [
-        h(Text, { key: `name:${agent.key}` }, `${agent.type} [${agent.key}]`),
-        h(Text, { key: `value:${agent.key}`, dimColor: true }, agent.override !== undefined ? `override ${agent.override}` : `inherit (${agent.model ?? runtime.sessionModel ?? "session"})`)
+        h(Box, { key: `label:${agent.key}`, flexDirection: "column" }, h(Text, { key: `name:${agent.key}` }, `${agent.type} [${agent.key}]`), h(Text, { key: `value:${agent.key}`, dimColor: true }, agent.override !== undefined ? `override ${runtime.selectionValue(agent.override)}` : `hereda (calidad: ${qualityLabel(runtime)})`))
       ];
       if (Select !== undefined) {
-        row.push(h(Select, {
-          key: `select:${agent.key}`,
-          options: optionList(runtime, agent),
-          value: currentValue(agent),
-          onSelect: (picked) => {
-            applyModel($, runtime, agent.key, picked).catch(() => {
-              return;
-            });
-          }
-        }));
+        for (const section of sections) {
+          const selected = section.items.some((option) => option.value === value) ? { value } : {};
+          row.push(h(Select, {
+            key: `select:${agent.key}:${section.id}`,
+            label: section.label,
+            options: section.items,
+            ...selected,
+            onSelect: (picked) => {
+              applyModel($, runtime, agent.key, picked).catch(() => {
+                return;
+              });
+            }
+          }));
+        }
       }
       if (Button !== undefined) {
         row.push(h(Button, {
@@ -954,9 +1325,9 @@ async function renderPanel($, e, runtime, next) {
     if (Button !== undefined) {
       children.push(h(Button, {
         key: "refresh",
-        label: "Refresh",
+        label: runtime.catalogError !== undefined ? "Reintentar" : "Refrescar",
         onPress: () => {
-          runtime.refresh().then(() => {
+          runtime.refreshCatalog().then(() => {
             try {
               $.ui.invalidate("ui.render");
             } catch {}
@@ -1017,15 +1388,23 @@ function hostOf($, fallbackCwd) {
       list: (path) => $.fs.list(path),
       exists: (path) => $.fs.exists(path)
     },
-    availableModels: async () => {
+    settings: {
+      read: async () => await $.settings.read()
+    },
+    httpFetch: async (url, init) => {
+      let timer;
+      const timeout = new Promise((_, reject) => {
+        timer = $.clock.after(5000, () => {
+          reject(new Error("gateway request timed out"));
+        });
+      });
       try {
-        const settings = await $.settings.read();
-        const value = settings && typeof settings === "object" ? settings.availableModels : undefined;
-        return normalizeAvailable(value);
-      } catch {
-        return;
+        return await Promise.race([$.http.fetch(url, init), timeout]);
+      } finally {
+        timer?.cancel();
       }
     },
+    processRun: (argv, init) => $.process.run(argv, { timeoutMs: 5000, ...init }),
     recordLastSpawn: (record) => {
       lastSpawn = record;
     }
@@ -1042,10 +1421,19 @@ async function refreshRuntime() {
     current.agents = await current.adapter.readAgents();
     current.models = await current.adapter.listModels();
     current.providers = await current.adapter.listProviders();
+    current.mainModel = current.adapter.mainModel();
+    current.catalogError = current.adapter.catalogError();
     current.sessionModel = await current.host.sessionModel();
   } catch (error) {
     current.log(`[flowtask-model] refresh failed: ${reasonOf2(error)}`);
   }
+}
+async function refreshCatalogRuntime() {
+  const current = runtime;
+  if (current === null)
+    return;
+  await current.adapter.refreshCatalog();
+  await refreshRuntime();
 }
 function register(on, raw) {
   on("session.start", async ($, e, next) => {
@@ -1108,13 +1496,17 @@ function register(on, raw) {
       adapter,
       root,
       sessionModel: undefined,
+      mainModel: undefined,
+      catalogError: undefined,
       version,
       gate,
       agents: [],
-      models: listModels(undefined),
-      providers: PROVIDERS,
+      models: [],
+      providers: [],
       isPanelAvailable: panelAvailable(api) && hasSurface,
       refresh: refreshRuntime,
+      refreshCatalog: refreshCatalogRuntime,
+      selectionValue: (selection) => adapter.selectionValue(selection),
       log: (message) => logLine($, message)
     };
     if (gate.status === "blocked") {
@@ -1131,6 +1523,7 @@ function register(on, raw) {
     } catch (error) {
       logLine($, `[flowtask-model] command unavailable: ${reasonOf2(error)}`);
     }
+    await adapter.seedCatalog();
     await refreshRuntime();
     logLine($, `[flowtask-model] ready (${gate.status})`);
     return next(e);
@@ -1171,7 +1564,7 @@ function register(on, raw) {
     if (model === undefined)
       return next(e);
     try {
-      current.log(`[flowtask-model] spawn ${subagentType} -> ${model}`);
+      current.log(`[flowtask-model] spawn ${subagentType} -> ${model} (${current.adapter.selectionValue(model)})`);
       const result = await next({ ...e, model });
       current.host.recordLastSpawn?.({
         agentKey: key,
