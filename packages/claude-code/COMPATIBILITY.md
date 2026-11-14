@@ -10,8 +10,8 @@ sostienen.
 | Constante | Valor | Motivo |
 | --- | --- | --- |
 | `MIN_VERSION` | `2.1.287` | primera versión con Mods públicos y `agent.spawn` |
-| `RECOMMENDED_VERSION` | `2.1.299` | resume estable y panel en VS Code |
-| `SETTINGS_READ_VERSION` | `2.1.304` | lectura de `availableModels` como mejora opcional |
+| `RECOMMENDED_VERSION` | `2.1.309` | resumen estable, discovery del gateway y alias preservados verificados |
+| `SETTINGS_READ_VERSION` | `2.1.304` | lectura del perfil (`env`) y del helper de credencial |
 
 `$.session.version()` no devuelve un string: resuelve
 `{ version, base?, builtAt? }`. El gate lee `version` y compara por segmentos.
@@ -59,10 +59,39 @@ exacto, después el `agent-key` normalizado y por último el sufijo tras el últ
 
 ## Catálogo de modelos
 
-El catálogo base son los aliases `sonnet`, `opus`, `haiku` y `fable`. Si
-`$.settings.read()` expone `availableModels` como un array no vacío de strings,
-ese array reemplaza a los aliases. Un shape distinto se ignora. El Mod nunca
-inventa el catálogo desde OpenCode ni desde otro runtime.
+El catálogo no es una lista fija: se obtiene del gateway que el motor ya usa en
+cada apertura del pane y en cada reintento.
+
+- **Fuente**: `GET {ANTHROPIC_BASE_URL}/v1/models`, con
+  `ANTHROPIC_API_BASE_URL` como alternativa. La respuesta no se guarda.
+- **Credencial**: si `settings.apiKeyHelper` existe, se ejecuta con
+  `process.run` y su salida se envía como `x-api-key`. Si la ejecución no está
+  disponible o falla, se lee el archivo del helper. Sin credencial la consulta se
+  intenta igual; un `401` o `403` activa el fallback. La key nunca se registra ni
+  se persiste.
+- **Forma**: la respuesta puede ser un array o un objeto con `data`, `models` o
+  `items`. El provider sale de `provider`/`providerName`/`owned_by` o del prefijo
+  de la referencia; el target sale de `target_model`/`targetModel` o de la
+  referencia completa (`id` o `display_name`). Las entradas sin provider se
+  omiten y los targets duplicados se deduplican.
+- **Regla de soporte**: se leen los targets `ANTHROPIC_MODEL`,
+  `ANTHROPIC_DEFAULT_SONNET_MODEL`, `ANTHROPIC_DEFAULT_HAIKU_MODEL` y
+  `ANTHROPIC_DEFAULT_OPUS_MODEL`. Se normaliza (minúsculas, sin `[1m]`, sin
+  `(1M context)`, espacios colapsados) y solo se ofrece el modelo cuyo target
+  coincide con `sonnet` o `haiku`. El target de `opus` se excluye porque el motor
+  lo sustituye por el modelo principal. Los modelos sin target preservado se
+  ocultan.
+- **Conversión**: la elección se guarda como el alias corto `sonnet` o `haiku`;
+  el router lo resuelve al proveedor y modelo reales del perfil. El pane muestra
+  el target actual al lado del valor guardado. Para la vía de calidad, si el
+  target principal no coincide con `sonnet`, se guarda el selector principal.
+- **Fallback**: si el gateway no responde, la credencial falla, la respuesta es
+  inválida o no hay modelos soportados, el catálogo contiene solo la vía de
+  calidad; el pane muestra un aviso con `Reintentar` y el comando `list`
+  antepone el aviso. No se lee un cache ni se escribe la lista en `$.store`.
+- **Herencia**: sin override, el Mod no escribe ningún modelo y `agent.spawn`
+  devuelve `next(e)`; el subagente hereda la conversación en curso. Quitar la
+  elección vuelve a ese estado.
 
 `inherit` no es un modelo: es la ausencia de override y se representa con la
 opción de limpieza del core.
@@ -107,6 +136,12 @@ elementos de la superficie:
 | vscode | sí | sí | sí |
 | mobile | no | no | sí |
 
+Con `Select`, cada fila de agente muestra el nombre, el valor actual, un selector
+por sección de proveedor y el botón Clear. La sección `All` no se dibuja. Un
+agente sin override muestra `hereda (calidad: <modelo principal>)`. Si el
+catálogo no cargó, el pane muestra el aviso y el botón `Reintentar`; sin error,
+el botón es `Refrescar`.
+
 Sin `Select`, el pane muestra las claves, el texto de comando y un botón de
 refresco; no se inventa un control. En `-p`, Agent SDK o cloud no se dibuja
 nada: el comando sigue funcionando y el listado va a `$.ui.log` (o a
@@ -129,8 +164,11 @@ plugins de Claude Code, no a este paquete.
 - El store no es atómico entre sesiones: dos sesiones que escriben la misma clave
   se pisan. El Mod escribe una sola clave por acción.
 - `agent.spawn` no permite fijar `effort`; la versión 1 sólo selecciona modelo.
-- El modelo efectivo puede diferir del pedido si el engine aplica
-  `availableModels` u otra política. El panel etiqueta el valor pedido como
-  `requested` cuando no hay un valor observado.
+- El modelo efectivo puede diferir del pedido si el engine sustituye el target.
+  La regla de soporte oculta los targets que no se preservan; el pane muestra el
+  target del catálogo y la verdad del modelo efectivo queda en el transcript del
+  subagente.
+- La credencial del proveedor económico vive en el perfil y la usa el gateway. El
+  Mod no la lee, no la registra y no la persiste.
 - Un `agent.spawn` que falla en el Mod sigue su curso: los hooks capturan el
   error, lo registran como `[flowtask-model] ...` y devuelven `next(e)`.

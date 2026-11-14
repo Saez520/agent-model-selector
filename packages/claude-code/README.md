@@ -6,19 +6,27 @@ de OpenCode ni escribe configuración de OpenCode.
 
 ## Qué hace
 
-- `/flowtask-model` abre un pane con una fila por agente: modelo actual, selector
-  y botón Clear.
+- `/flowtask-model` abre un pane con una fila por agente: nombre, modelo actual,
+  un selector por proveedor y el botón Clear.
+- La oferta de modelos se lee viva del gateway configurado en la sesión, agrupada
+  por proveedor, en cada apertura y en cada reintento.
+- Solo se ofrecen los modelos cuyo target coincide con un tier que el motor
+  preserva en subagentes (`sonnet` o `haiku`). La elección se guarda como el alias
+  corto y el router la resuelve al proveedor y modelo reales del perfil.
+- Si el gateway no responde, la credencial falla o la respuesta no es válida, el
+  pane muestra la vía de calidad con un aviso y la opción de reintentar.
 - `list`, `set`, `clear`, `clear --all`, `export` e `import` funcionan sin pane,
   incluso en `claude -p`.
 - Un override se aplica cuando el agente arranca: el hook `agent.spawn` reescribe
   el modelo del spawn, sin negarlo.
 - Limpiar el override devuelve el agente a su herencia (frontmatter o modelo de
-  la sesión).
+  la sesión). Sin override, el subagente hereda la conversación en curso.
 - La persistencia vive en `$.store`, con una clave por proyecto y agente:
   `flowtask-model:v1:<raíz codificada>:<agent-key>`.
 
 Los overrides de un proyecto no se ven desde otro. El estado se conserva entre
-sesiones y recargas del plugin.
+sesiones y recargas del plugin. La oferta de modelos no se cachea ni se escribe
+en el store.
 
 ## Uso
 
@@ -33,8 +41,10 @@ sesiones y recargas del plugin.
 /flowtask-model import backup.json
 ```
 
-`set` acepta un alias (`sonnet`, `opus`, `haiku`, `fable`), un id completo o
-`inherit`. `inherit` equivale a limpiar el override.
+`set` acepta un alias (`sonnet`, `haiku`), un id completo o `inherit`. El valor
+`provider/model` que muestra el selector también se acepta: se resuelve al alias
+del tier cuando el modelo está soportado y se rechaza sin escribir cuando no lo
+está. `inherit` equivale a limpiar el override.
 
 `export` produce un mapping portable:
 
@@ -67,9 +77,18 @@ los hooks. El kit `claude-code/testing` permite responder `$.store` en memoria
 
 ## Requisitos y límites
 
-- Piso: Claude Code `2.1.287`. Recomendado: `2.1.299`.
-- `settings.read` (`2.1.304` o superior) agrega `availableModels` al catálogo;
-  sin esa superficie se usan los aliases.
+- Piso: Claude Code `2.1.287`. Recomendado: `2.1.309`.
+- El catálogo vivo usa `settings.read` para el perfil y el helper de credencial,
+  `http.fetch` para el discovery y `process.run` para ejecutar el helper. Sin
+  `settings.read` el catálogo no puede cargar y queda la vía de calidad.
+- El gateway debe exponer `GET {ANTHROPIC_BASE_URL}/v1/models`. Si no responde,
+  la credencial falla o la respuesta no es válida, se muestra la vía de calidad
+  con aviso y reintento.
+- Solo se muestran los modelos cuyo target coincide con `sonnet` o `haiku`. El
+  target de `opus` y los modelos sin target preservado se ocultan porque el motor
+  los sustituye o no los garantiza.
+- La credencial del proveedor vive en el perfil y la usa el gateway. El Mod no
+  lee la key del proveedor, no la registra y no la persiste.
 - El panel depende de la superficie. Terminal, desktop y VS Code tienen
   `Select`; mobile no, y el pane muestra la forma de comando.
 - En `-p`, Agent SDK, cloud o WSL sin plugins no se dibuja nada. El comando sigue
@@ -77,9 +96,9 @@ los hooks. El kit `claude-code/testing` permite responder `$.store` en memoria
 - No hay keybinding global: el comando es la entrada.
 - Un fork o un resume no cambia el modelo; el Mod lo ignora y lo registra.
 - `agent.spawn` no permite fijar `effort`: la versión 1 sólo selecciona modelo.
-- Si el engine aplica `availableModels` u otra política, el valor efectivo puede
-  diferir del pedido. El panel etiqueta el pedido como `requested` cuando no hay
-  una observación del engine.
+- Si el engine aplica otra política, el valor efectivo puede diferir del pedido.
+  El panel muestra el target del catálogo; la verdad del modelo efectivo está en
+  el transcript del subagente.
 
 ## Persistencia y rollback
 

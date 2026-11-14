@@ -72,7 +72,7 @@ export function evaluateGate(versionInput: unknown, api: GateApi = {}): GateResu
   if (api.ui === false) warnings.push("panel unavailable; command mode only");
   if (api.fs === false) warnings.push("filesystem unavailable; agent discovery disabled");
   if (api.settingsRead === false) {
-    warnings.push("settings.read unavailable; alias catalog in use");
+    warnings.push("settings.read unavailable; live model catalog disabled");
   }
 
   return {

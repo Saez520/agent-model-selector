@@ -1,5 +1,5 @@
 export const MIN_VERSION = "2.1.287";
-export const RECOMMENDED_VERSION = "2.1.299";
+export const RECOMMENDED_VERSION = "2.1.309";
 export const SETTINGS_READ_VERSION = "2.1.304";
 
 /**

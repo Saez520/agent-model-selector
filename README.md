@@ -47,13 +47,19 @@ en desarrollo con `claude --plugin-dir packages/claude-code` y expone el comando
 /flowtask-model import backup.json
 ```
 
-El override se guarda por proyecto y agente en el store del plugin y se aplica
-en el hook `agent.spawn`. El panel muestra el modelo actual y permite cambiarlo o
-limpiarlo; en superficies sin `Select` se usa la forma de comando. En `-p` no se
-dibuja nada, pero los argumentos siguen operando.
+Al abrir el pane, la oferta de modelos se lee del gateway configurado en
+`settings.env.ANTHROPIC_BASE_URL` y se agrupa por proveedor. Solo se muestran los
+modelos cuyo target coincide con un tier que el motor preserva en subagentes
+(`sonnet` o `haiku`); el resto se oculta. La elección se guarda como el alias
+corto del tier y el router la resuelve al proveedor y modelo reales del perfil.
 
-El plugin requiere Claude Code `2.1.287` o superior. El detalle de la API, la
-persistencia y los límites está en
+Si el gateway no responde, la credencial falla o la respuesta no es válida, el
+pane muestra la vía de calidad con un aviso y la opción de reintentar. La lista
+no se cachea ni se guarda. Sin override, el subagente hereda la conversación en
+curso (vía de calidad): el Mod no escribe ningún modelo.
+
+El plugin requiere Claude Code `2.1.287` o superior; la versión recomendada es
+`2.1.309`. El detalle de la API, la persistencia y los límites está en
 [`packages/claude-code/COMPATIBILITY.md`](./packages/claude-code/COMPATIBILITY.md).
 
 ## Preset
