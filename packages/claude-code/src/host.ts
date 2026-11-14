@@ -18,6 +18,47 @@ export interface HostStore {
   keys(): Promise<readonly string[]>;
 }
 
+export interface HostSettings {
+  read(): Promise<Readonly<Record<string, unknown>>>;
+}
+
+export interface HostHttpInit {
+  method?: string;
+  headers?: Record<string, string>;
+  body?: string;
+}
+
+export interface HostHttpResponse {
+  status: number;
+  ok?: boolean;
+  headers?: Record<string, string>;
+  text: string;
+}
+
+export interface HostProcessInit {
+  cwd?: string;
+  env?: Record<string, string>;
+  stdin?: string;
+  timeoutMs?: number;
+}
+
+export interface HostProcessResult {
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+}
+
+export interface HostHttp {
+  fetch(url: string, init?: HostHttpInit): Promise<HostHttpResponse>;
+}
+
+export interface HostProcess {
+  run(
+    argv: readonly string[],
+    init?: HostProcessInit
+  ): Promise<HostProcessResult>;
+}
+
 export interface AgentDefinition {
   id: string;
   source: "project" | "user";
@@ -48,7 +89,11 @@ export interface ClaudeCodeHost {
   store: HostStore;
   fs: HostFs;
   agentDefinitions?(): Promise<readonly AgentDefinition[] | undefined>;
-  availableModels(): Promise<readonly string[] | undefined>;
+  settings?: HostSettings;
+  httpFetch?: HostHttp["fetch"];
+  processRun?: HostProcess["run"];
+  /** Legacy surface kept until the adapter stops reading available models. */
+  availableModels?(): Promise<readonly string[] | undefined>;
   recordLastSpawn?(record: SpawnRecord): void;
 }
 

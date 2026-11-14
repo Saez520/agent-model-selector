@@ -314,7 +314,7 @@ export function createAdapter(host: ClaudeCodeHost): ClaudeCodeAdapter {
       return PROVIDERS;
     },
     async listModels() {
-      const available = await host.availableModels().catch(() => undefined);
+      const available = await host.availableModels?.().catch(() => undefined);
       return modelsFromAvailable(available);
     },
     readAgents,

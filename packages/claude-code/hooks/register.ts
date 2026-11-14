@@ -65,6 +65,25 @@ function hostOf($: EngineInterface, fallbackCwd: string): ClaudeCodeHost {
       list: (path) => $.fs.list(path),
       exists: (path) => $.fs.exists(path),
     },
+    settings: {
+      read: async () =>
+        (await $.settings.read()) as Readonly<Record<string, unknown>>,
+    },
+    httpFetch: async (url, init) => {
+      let timer: { cancel: () => void } | undefined;
+      const timeout = new Promise<never>((_, reject) => {
+        timer = $.clock.after(5000, () => {
+          reject(new Error("gateway request timed out"));
+        });
+      });
+      try {
+        return await Promise.race([$.http.fetch(url, init), timeout]);
+      } finally {
+        timer?.cancel();
+      }
+    },
+    processRun: (argv, init) =>
+      $.process.run(argv, { timeoutMs: 5000, ...init }),
     availableModels: async () => {
       try {
         const settings = await $.settings.read();
