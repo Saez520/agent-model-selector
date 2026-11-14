@@ -100,10 +100,19 @@ async function refreshRuntime(): Promise<void> {
     current.agents = await current.adapter.readAgents();
     current.models = await current.adapter.listModels();
     current.providers = await current.adapter.listProviders();
+    current.mainModel = current.adapter.mainModel();
+    current.catalogError = current.adapter.catalogError();
     current.sessionModel = await current.host.sessionModel();
   } catch (error) {
     current.log(`[flowtask-model] refresh failed: ${reasonOf(error)}`);
   }
+}
+
+async function refreshCatalogRuntime(): Promise<void> {
+  const current = runtime;
+  if (current === null) return;
+  await current.adapter.refreshCatalog();
+  await refreshRuntime();
 }
 
 /**
@@ -179,6 +188,8 @@ export function register(on: On, raw: PluginOptions): void {
       adapter,
       root,
       sessionModel: undefined,
+      mainModel: undefined,
+      catalogError: undefined,
       version,
       gate,
       agents: [],
@@ -186,6 +197,8 @@ export function register(on: On, raw: PluginOptions): void {
       providers: [],
       isPanelAvailable: panelAvailable(api) && hasSurface,
       refresh: refreshRuntime,
+      refreshCatalog: refreshCatalogRuntime,
+      selectionValue: (selection) => adapter.selectionValue(selection),
       log: (message) => logLine($, message),
     };
 
@@ -209,6 +222,7 @@ export function register(on: On, raw: PluginOptions): void {
       logLine($, `[flowtask-model] command unavailable: ${reasonOf(error)}`);
     }
 
+    await adapter.seedCatalog();
     await refreshRuntime();
     logLine($, `[flowtask-model] ready (${gate.status})`);
     return next(e);
@@ -255,7 +269,9 @@ export function register(on: On, raw: PluginOptions): void {
     if (model === undefined) return next(e);
 
     try {
-      current.log(`[flowtask-model] spawn ${subagentType} -> ${model}`);
+      current.log(
+        `[flowtask-model] spawn ${subagentType} -> ${model} (${current.adapter.selectionValue(model)})`
+      );
       const result = await next({ ...e, model });
       current.host.recordLastSpawn?.({
         agentKey: key,

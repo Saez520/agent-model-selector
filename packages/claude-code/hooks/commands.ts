@@ -1,4 +1,4 @@
-import { CLEAR_SENTINEL, isInherit, modelRef, stripModelRef } from "../src/models";
+import { CLEAR_SENTINEL, isInherit, stripModelRef } from "../src/models";
 import { agentKey } from "../src/keys";
 import type { Runtime } from "./runtime";
 import { logLine } from "./runtime";
@@ -10,8 +10,10 @@ function reasonOf(error: unknown): string {
 }
 
 function valueOf(runtime: Runtime, agent: Runtime["agents"][number]): string {
-  if (agent.override !== undefined) return `override ${agent.override}`;
-  const inherited = agent.model ?? runtime.sessionModel ?? "session";
+  if (agent.override !== undefined) {
+    return `override ${runtime.selectionValue(agent.override)}`;
+  }
+  const inherited = runtime.mainModel?.target ?? runtime.sessionModel ?? "session";
   return `inherit (${inherited})`;
 }
 
@@ -20,6 +22,7 @@ function formatAgent(runtime: Runtime, agent: Runtime["agents"][number]): string
 }
 
 async function openPanel($: any, runtime: Runtime): Promise<{ text?: string }> {
+  await runtime.refreshCatalog();
   if (!runtime.isPanelAvailable) {
     return { text: USAGE };
   }
@@ -102,10 +105,14 @@ export async function handleCommand(
 
     if (verb === "list") {
       const lines = runtime.agents.map((agent) => formatAgent(runtime, agent));
-      const text =
+      const body =
         lines.length > 0
           ? lines.join("\n")
           : "no agents found; set <agent-key> <model> still works";
+      const text =
+        runtime.catalogError !== undefined
+          ? `${runtime.catalogError.message}\n${body}`
+          : body;
       runtime.log(text);
       return { text };
     }
@@ -166,12 +173,4 @@ export async function handleCommand(
     logLine($, text);
     return { text };
   }
-}
-
-/**
- * The selected value the pane sends back: the clear sentinel or a
- * `claude-code/<model>` reference.
- */
-export function selectedValue(override?: string): string {
-  return override === undefined ? CLEAR_SENTINEL : modelRef(override);
 }

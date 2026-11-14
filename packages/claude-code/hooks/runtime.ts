@@ -1,5 +1,6 @@
 import type { ModelInfo, ProviderInfo } from "@agent-model-selector/core";
 import type { ClaudeCodeAdapter } from "../src/adapter";
+import type { CatalogError, CatalogModel } from "../src/catalog";
 import type { GateResult } from "../src/capabilities";
 import type { ClaudeCodeHost, RuntimeAgent } from "../src/host";
 
@@ -17,8 +18,12 @@ export interface Runtime {
   agents: RuntimeAgent[];
   models: ModelInfo[];
   providers: ProviderInfo[];
+  mainModel?: CatalogModel;
+  catalogError?: CatalogError;
   isPanelAvailable: boolean;
   refresh(): Promise<void>;
+  refreshCatalog(): Promise<void>;
+  selectionValue(selection: string): string;
   log(message: string): void;
 }
 

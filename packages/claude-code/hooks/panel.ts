@@ -1,8 +1,8 @@
-import { buildModelOptions, type SelectOption } from "@agent-model-selector/core";
-import { CLEAR_SENTINEL, modelRef } from "../src/models";
+import { buildModelSections } from "@agent-model-selector/core";
+import { CLEAR_SENTINEL } from "../src/models";
 import type { RuntimeAgent } from "../src/host";
 import type { Runtime } from "./runtime";
-import { applyModel, clearModel, selectedValue } from "./commands";
+import { applyModel, clearModel } from "./commands";
 
 function rowsAvailable(e: any): number {
   const rows = e?.props?.scroll?.bodyRows;
@@ -11,22 +11,14 @@ function rowsAvailable(e: any): number {
     : 14;
 }
 
-function currentValue(agent: RuntimeAgent): string {
-  return selectedValue(agent.override);
+function currentValue(runtime: Runtime, agent: RuntimeAgent): string {
+  return agent.override !== undefined
+    ? runtime.selectionValue(agent.override)
+    : CLEAR_SENTINEL;
 }
 
-function optionList(
-  runtime: Runtime,
-  agent: RuntimeAgent
-): SelectOption<string>[] {
-  const options = buildModelOptions(runtime.models, runtime.providers);
-  const value = currentValue(agent);
-  if (options.some((option) => option.value === value)) return options;
-  if (agent.override === undefined) return options;
-  return [
-    { title: `${agent.override} (current)`, value },
-    ...options,
-  ];
+function qualityLabel(runtime: Runtime): string {
+  return runtime.mainModel?.target ?? runtime.sessionModel ?? "session";
 }
 
 function headerText(runtime: Runtime): string {
@@ -56,36 +48,60 @@ export async function renderPanel(
     if (Box === undefined || Text === undefined) return next(e);
 
     const rows = rowsAvailable(e);
-    const visible = runtime.agents.slice(0, Math.max(1, rows - 4));
+    const visible = runtime.agents.slice(0, Math.max(1, rows - 5));
+    const sections = buildModelSections(runtime.models, runtime.providers).filter(
+      (section) => section.kind !== "all"
+    );
     const children: unknown[] = [
       h(Text, { key: "title" }, "FlowTask Model"),
       h(Text, { key: "root", dimColor: true }, runtime.root),
       h(Text, { key: "meta", dimColor: true }, headerText(runtime)),
     ];
 
+    if (runtime.catalogError !== undefined) {
+      children.push(
+        h(Text, { key: "catalog-error" }, runtime.catalogError.message)
+      );
+    }
+
     for (const agent of visible) {
+      const value = currentValue(runtime, agent);
       const row: unknown[] = [
-        h(Text, { key: `name:${agent.key}` }, `${agent.type} [${agent.key}]`),
         h(
-          Text,
-          { key: `value:${agent.key}`, dimColor: true },
-          agent.override !== undefined
-            ? `override ${agent.override}`
-            : `inherit (${agent.model ?? runtime.sessionModel ?? "session"})`
+          Box,
+          { key: `label:${agent.key}`, flexDirection: "column" },
+          h(Text, { key: `name:${agent.key}` }, `${agent.type} [${agent.key}]`),
+          h(
+            Text,
+            { key: `value:${agent.key}`, dimColor: true },
+            agent.override !== undefined
+              ? `override ${runtime.selectionValue(agent.override)}`
+              : `hereda (calidad: ${qualityLabel(runtime)})`
+          )
         ),
       ];
 
       if (Select !== undefined) {
-        row.push(
-          h(Select, {
-            key: `select:${agent.key}`,
-            options: optionList(runtime, agent),
-            value: currentValue(agent),
-            onSelect: (picked: string) => {
-              void applyModel($, runtime, agent.key, picked).catch(() => undefined);
-            },
-          })
-        );
+        for (const section of sections) {
+          const selected = section.items.some(
+            (option) => option.value === value
+          )
+            ? { value }
+            : {};
+          row.push(
+            h(Select, {
+              key: `select:${agent.key}:${section.id}`,
+              label: section.label,
+              options: section.items,
+              ...selected,
+              onSelect: (picked: string) => {
+                void applyModel($, runtime, agent.key, picked).catch(
+                  () => undefined
+                );
+              },
+            })
+          );
+        }
       }
 
       if (Button !== undefined) {
@@ -127,10 +143,10 @@ export async function renderPanel(
       children.push(
         h(Button, {
           key: "refresh",
-          label: "Refresh",
+          label: runtime.catalogError !== undefined ? "Reintentar" : "Refrescar",
           onPress: () => {
             void runtime
-              .refresh()
+              .refreshCatalog()
               .then(() => {
                 try {
                   $.ui.invalidate("ui.render");
