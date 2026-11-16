@@ -152,12 +152,19 @@ No hay API de keybinding global. El comando se registra con
 
 ## Distribución
 
-El plugin se carga en desarrollo con `claude --plugin-dir <ruta>` y se valida con
-`claude plugin validate <ruta>`. El manifest declara `destinations:
-["claude-code"]`; el instalador de OpenCode descarta esa entrada antes de copiar
-o registrar, de modo que la presencia del paquete no altera OpenCode. La copia y
-el registro en el runtime de usuario pertenecen al mecanismo de instalación de
-plugins de Claude Code, no a este paquete.
+La raíz del repositorio publica el marketplace `agent-model-selector`; su
+entrada `flowtask-model` apunta a `./packages/claude-code`, de modo que el ref
+instalable es `flowtask-model@agent-model-selector`. El manifest declara
+`destinations: ["claude-code"]` y la versión del plugin iguala el tag de
+release.
+
+La copia y el registro en el runtime de usuario pertenecen al gestor de plugins
+de Claude Code, no a este paquete: ningún archivo se copia al proyecto y retirar
+el checkout del repositorio no afecta lo instalado. Para desarrollo se carga el
+paquete local con `claude --plugin-dir <ruta>` y se valida con
+`claude plugin validate <ruta>`. El instalador de OpenCode descarta esta entrada
+antes de copiar o registrar, de modo que la presencia del paquete no altera
+OpenCode.
 
 ## Límites conocidos
 

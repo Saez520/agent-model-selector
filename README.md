@@ -33,9 +33,21 @@ configuración se conserva sin cambios.
 
 ## Uso en Claude Code
 
-El paquete `agent-model-selector-claude-code` es un Mod de Claude Code. Se carga
-en desarrollo con `claude --plugin-dir packages/claude-code` y expone el comando
-`/flowtask-model`:
+El paquete `agent-model-selector-claude-code` es un Mod de Claude Code y expone
+el comando `/flowtask-model`. El repositorio publica su propio marketplace, así
+que el plugin se instala con el gestor de Claude Code sin FlowTask y sin crear
+carpetas de FlowTask en el proyecto:
+
+```bash
+claude plugin marketplace add Saez520/agent-model-selector
+claude plugin install flowtask-model@agent-model-selector
+```
+
+El gestor copia y registra el plugin en su store de usuario; después de instalar
+no se necesita el checkout del repositorio. Para desarrollo se carga el paquete
+local con `claude --plugin-dir packages/claude-code`.
+
+El comando:
 
 ```text
 /flowtask-model

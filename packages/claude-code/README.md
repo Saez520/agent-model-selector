@@ -59,6 +59,20 @@ está. `inherit` equivale a limpiar el override.
 `import` valida el mapping con el core antes de escribir. Un mapping inválido no
 deja escrituras parciales.
 
+## Instalación
+
+El repositorio publica el marketplace `agent-model-selector`; el plugin se
+instala desde ahí con el gestor de Claude Code:
+
+```bash
+claude plugin marketplace add Saez520/agent-model-selector
+claude plugin install flowtask-model@agent-model-selector
+```
+
+Requiere Claude Code `2.1.287` o superior; la versión recomendada es `2.1.309`.
+La copia y el registro los hace el gestor en su store de usuario, así que el
+checkout del repositorio no se necesita después de instalar.
+
 ## Carga en desarrollo
 
 ```bash
