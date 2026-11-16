@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "agent-model-selector",
+  "description": "Model selection for Claude Code: pick the model each agent uses, per project.",
+  "owner": {
+    "name": "FlowTask"
+  },
+  "plugins": [
+    {
+      "name": "flowtask-model",
+      "description": "Select the model each Claude Code agent uses, per project, with a pane and a command.",
+      "author": {
+        "name": "FlowTask"
+      },
+      "source": "./packages/claude-code"
+    }
+  ]
+}

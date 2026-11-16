@@ -11,7 +11,7 @@
     },
     "packages/claude-code": {
       "name": "agent-model-selector-claude-code",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "dependencies": {
         "@agent-model-selector/core": "workspace:*",
       },
